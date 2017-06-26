@@ -15,14 +15,14 @@ import PyPDF2
 RE_MONTHS = r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'
 
 REGEX = r"(?P<date1>\d{2}%months%)"\
-        r"(?P<core>[\w \*\-&/'\.#]*)"\
+        r"(?P<core>[\w \*\-\+&/'\.#]*)"\
         r"(?P<amt>(\d{1,2}.)?\d{1,3}\.\d{2}(Cr)?)"\
         r"(?P<tot>\d{2,3},\d{3}\.\d{2})Cr(\d\.\d{2})?"
 
 REGEX = REGEX.replace(r'%months%', RE_MONTHS)
 
 
-TYPES =["POS International Purchase Chq", "POS Purchase Chq Card", "Internet Pmt To", 
+TYPES =["POS International Purchase Chq", "POS Purchase Chq Card", "Internet Pmt To",
         "Magtape Debit", "ATM Cash", "Chq Card Fuel Purchase", "FNB App Payment To",
         "Notification - Email", "#", "Refund Chq Card Purchase", "FNB OB Pmt", "Magtape Credit"]
 
@@ -38,7 +38,7 @@ def decompose_core(core):
     typ = m.group(0)
     core = core[len(typ):]
 
-    
+
     m = re.search(CORE_END_REGEX, core)
     if m and len(m.group(0)):
         card = m.group('card')
@@ -48,7 +48,7 @@ def decompose_core(core):
         carry = m.group('carry')
         core = core[:-len(m.group(0))]
     else:
-        card = date2 = carry = '' 
+        card = date2 = carry = ''
         print "No end for core:", core
 
 
@@ -73,13 +73,13 @@ def decompose_record(match, prev_total, month_to_year):
     total = float(total)
 
     if prev_total and not round(amount,5) == round(total-prev_total,5):
-        delta = total-prev_total      
+        delta = total-prev_total
         amt_str = str(abs(amount))
         delta_str = str(abs(delta))
-        assert amt_str.endswith(delta_str)
         amount = delta
         print ">>> PrevTot({}) + Amount({}) != Total({}) --> {}".format(prev_total, amount, total, total-prev_total-amount)
-    
+        assert amt_str.endswith(delta_str), "{} {}".format(amt_str, delta_str)
+
 
     record = {  'date': set_record_year(date, month_to_year),
                 'type': typ,
@@ -116,7 +116,7 @@ def classify(record):
     for clas, keywords in DESCRIPTION_CLASS.iteritems():
         for key in keywords:
             if key in record['description'].lower():
-                return clas 
+                return clas
 
 
     if record['type'] in ["Magtape Credit", "Internet Pmt To", "FNB OB Pmt", "FNB App Payment To"]:
@@ -131,7 +131,7 @@ def classify(record):
 
 
 
-  
+
 
 
 
@@ -170,7 +170,7 @@ def main():
 
         records = decompose_file('./statements/'+file_name, month_to_year)
         all_records += records
-        
+
 
     with open('records.csv', 'wb') as f:
         dict_writer = csv.DictWriter(f, all_records[0].keys())
@@ -181,10 +181,3 @@ def main():
 
 if __name__=='__main__':
     main()
-
-
-
-    
-
-
-
