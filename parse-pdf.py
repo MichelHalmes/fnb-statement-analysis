@@ -8,23 +8,21 @@ import csv
 import PyPDF2
 
 
-
-
-
-
 RE_MONTHS = r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)'
 
 REGEX = r"(?P<date1>\d{2}%months%)"\
-        r"(?P<core>[\w \*\-\+&/'\.#]*)"\
+        r"(?P<core>[\w :\*\-\+&/'\.#\(\)]*)"\
         r"(?P<amt>(\d{1,2}.)?\d{1,3}\.\d{2}(Cr)?)"\
-        r"(?P<tot>\d{2,3},\d{3}\.\d{2})Cr(\d\.\d{2})?"
+        r"(?P<tot>\d{2,3},\d{3}\.\d{2})Cr(\d{1,3}\.\d{2})?"
 
 REGEX = REGEX.replace(r'%months%', RE_MONTHS)
 
 
-TYPES =["POS International Purchase Chq", "POS Purchase Chq Card", "Internet Pmt To",
-        "Magtape Debit", "ATM Cash", "Chq Card Fuel Purchase", "FNB App Payment To",
-        "Notification - Email", "#", "Refund Chq Card Purchase", "FNB OB Pmt", "Magtape Credit"]
+TYPES = ["POS International Purchase Chq", "POS Purchase Chq Card", "Internet Pmt To", "Int-banking Pmt Frm",
+         "Magtape Debit", "ATM Cash", "Chq Card Fuel Purchase", "FNB App Payment To", "FNB App Payment From",
+         "Notification - Email", "Notification - Sms", "#", "Refund Chq Card Purchase", "FNB OB Pmt", "Magtape Credit", 
+         "Internet Airtime Topup", "Electricity Prepaid","Internet Trf To", "Inward Swift", "Scheduled Payment To",
+         "Forex Deposit", "FNB App Geo Payment From", "Teller Cash", "Cash Handling Fee"]
 
 TYPE_REGEX = r"^(?P<type>%types%)".replace('%types%', '|'.join(TYPES))
 
@@ -34,7 +32,7 @@ CORE_END_REGEX =  r"(?P<card>(412752(\*|500081)2632(  )?)?)"\
 
 def decompose_core(core):
     m = re.search(TYPE_REGEX, core)
-    assert m
+    assert m, "Type-regex did not match! Check transaction types"
     typ = m.group(0)
     core = core[len(typ):]
 
@@ -64,6 +62,7 @@ def decompose_record(match, prev_total, month_to_year):
     typ, card, date2, carry, desc = decompose_core(match.group('core'))
 
     amount = carry + match.group('amt').replace(',', '')
+
     if amount.endswith("Cr"):
         amount = float(amount.replace('Cr', ''))
     else:
@@ -72,13 +71,17 @@ def decompose_record(match, prev_total, month_to_year):
     total = match.group('tot').replace(',', '')
     total = float(total)
 
-    if prev_total and not round(amount,5) == round(total-prev_total,5):
-        delta = total-prev_total
+    if prev_total and not round(amount, 5) == round(total - prev_total, 5):
+        delta = total - prev_total
         amt_str = str(abs(amount))
         delta_str = str(abs(delta))
-        amount = delta
-        print ">>> PrevTot({}) + Amount({}) != Total({}) --> {}".format(prev_total, amount, total, total-prev_total-amount)
-        assert amt_str.endswith(delta_str), "{} {}".format(amt_str, delta_str)
+        if amt_str.endswith(delta_str):
+            amount = delta  # There was a miss-interpreted carry -> correct by the delta
+        else:
+            raise ValueError("Some transaction must have been ignored because it didn't match the overall regex! " 
+                            "Check for special characters in the description")
+        assert round(amount, 5) == round(total - prev_total, 5), \
+                    ">>> PrevTot({}) + Amount({}) != Total({}) --> {}".format(prev_total, amount, total, total-prev_total-amount)
 
 
     record = {  'date': set_record_year(date, month_to_year),
@@ -100,17 +103,19 @@ def set_record_year(date, month_to_year):
 
 
 DESCRIPTION_CLASS = {
-    'public_tansport': ['uber', 'myciti'],
-    'foodlovers': ['foodlovers', 'food lovers'],
-    'groceries': ['woolworths', 'spar', 'pick n pay', 'checkers'],
+    'public_tansport': ['uber', 'myciti', 'taxify'],
+    'lunch': ['foodlovers', 'food lovers', 'mariams'],
+    'groceries': ['woolworths', 'spar', 'pick n pay', 'checkers', 'pnp'],
     'salary': ['axio02'],
-    'fixed': ['afrihost', 'outsurance', 'epic3', 'economist'],
-    'rent': ['rent michel'],
-    'booze_bar': ['liquor', 'tops', 'brew', 'bar', 'wine', 'cafe'],
-    'events': ['quicket', 'webticket'],
-    'takealot': ['takealot']
-
-    }
+    'fixed': ['afrihost', 'outsurance', 'epic3', 'economist', 'telkom'],
+    'rent_costs': ['rent michel', 'hillside_rent', 'electricity', 'memory', 'airbnb payout', 'lauriane'],
+    'booze_bar': ['liquor', 'tops', 'brew', 'bar', 'wine', 'cafe', 'tjing', 'yours truly', 'hunks'],
+    'restaurant': ['restaurant', 'eater', 'sushi', 'pizza', 'tigers'],
+    'mobile_payments': ['snapscan'],
+    'events': ['quicket', 'webticket', 'nutickets', 'computicket'],
+    'takealot': ['takealot'],
+    'flights_ntc': ['ntc-michel', 'emirates', 'kulula', 'mango', 'ethiopian', 'safair']
+}
 
 def classify(record):
     for clas, keywords in DESCRIPTION_CLASS.iteritems():
@@ -118,24 +123,22 @@ def classify(record):
             if key in record['description'].lower():
                 return clas
 
-
-    if record['type'] in ["Magtape Credit", "Internet Pmt To", "FNB OB Pmt", "FNB App Payment To"]:
+    if record['type'] in ["Magtape Credit", "Internet Pmt To", "FNB OB Pmt", "FNB App Payment To", "FNB App Payment From", "Int-banking Pmt Frm", "FNB App Geo Payment From"]:
+        if record['amount'] < -800:
+            return 'large_payments'
         return "payments"
-    if record['type'] == "ATM Cash":
+    if record['type'] == "Internet Trf To":
+        return "savings"
+    if record['type'] in ["Inward Swift", "Forex Deposit"]:
+        return "euro_transfer"
+    if record['type'] in ["ATM Cash", "Teller Cash"]:
+        if record['amount'] < -800:
+            return 'large_cash'
         return "cash"
     if record['type'] == "Chq Card Fuel Purchase":
         return "fuel"
-    if record['amount'] < -600:
+    if record['amount'] < -800:
         return 'large_expense'
-
-
-
-
-
-
-
-
-
 
 def decompose_file(file_path, file_date):
     records = []
@@ -148,14 +151,15 @@ def decompose_file(file_path, file_date):
         prev_end = None
         prev_total = None
         for match in re.finditer(REGEX, text, re.S):
-            record =  decompose_record(match, prev_total, file_date)
+            record = decompose_record(match, prev_total, file_date)
             print record
             records.append(record)
             prev_total = record['total']
             if prev_end:
-                assert prev_end == match.start()
+                assert prev_end == match.start(), (prev_end, match.start())
             prev_end = match.end()
     return records
+
 
 def main():
     all_records = []
@@ -171,12 +175,10 @@ def main():
         records = decompose_file('./statements/'+file_name, month_to_year)
         all_records += records
 
-
     with open('records.csv', 'wb') as f:
         dict_writer = csv.DictWriter(f, all_records[0].keys())
         dict_writer.writeheader()
         dict_writer.writerows(all_records)
-
 
 
 if __name__=='__main__':
