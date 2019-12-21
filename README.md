@@ -27,5 +27,5 @@ It categorizes each transaction across the following categories:
 
 The data was then analyzed in Tableau
 
-<img src="media/Graph.png" alt="Graph" width="400px">
+<img src="media/Graph.png" alt="Graph" width="700px">
 
